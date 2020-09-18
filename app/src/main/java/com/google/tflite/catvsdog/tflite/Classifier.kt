@@ -55,11 +55,16 @@ class Classifier(assetManager: AssetManager, modelPath: String, labelPath: Strin
     }
 
     /**
+     *
+     * Resize the bitmap to 224 X 224 with createScaledBitmap
+     *
      * Returns the result after running the recognition with the help of interpreter
      * on the passed bitmap
      */
     fun recognizeImage(bitmap: Bitmap): List<Recognition> {
         val scaledBitmap = Bitmap.createScaledBitmap(bitmap, inputSize, inputSize, false)
+        //Batch size is 4 (Floating point model)
+        //Byte to buffer for efficient processing
         val byteBuffer = convertBitmapToByteBuffer(scaledBitmap)
         val result = Array(1) { FloatArray(lableList.size) }
         interpreter.run(byteBuffer, result)
@@ -68,6 +73,9 @@ class Classifier(assetManager: AssetManager, modelPath: String, labelPath: Strin
 
 
     private fun convertBitmapToByteBuffer(bitmap: Bitmap): ByteBuffer {
+        //Batch size is 4 (Floating point model)
+        //However when it comes to fully integer pre-optimized model,
+        //value turns out to be one
         val byteBuffer = ByteBuffer.allocateDirect(4 * inputSize * inputSize * pixelSize)
         byteBuffer.order(ByteOrder.nativeOrder())
         val intValues = IntArray(inputSize * inputSize)
@@ -78,6 +86,18 @@ class Classifier(assetManager: AssetManager, modelPath: String, labelPath: Strin
             for (j in 0 until inputSize) {
                 val input = intValues[pixel++]
 
+                /*
+                Get R-G-B channels of the image
+                sequentially first is red second is green third is
+                blue RGB value is an integer so it's represented
+                in memory by 4 bytes or equivalently 32 bits
+                Converting into one byte for each component
+                This is opaque image
+                 */
+                /*
+                For our cat vs dog model we r assuming the image mean
+                is 0 and that the standard deviation is 255
+                 */
                 byteBuffer.putFloat((((input.shr(16)  and 0xFF) - imageMean) / imageStd))
                 byteBuffer.putFloat((((input.shr(8) and 0xFF) - imageMean) / imageStd))
                 byteBuffer.putFloat((((input and 0xFF) - imageMean) / imageStd))
@@ -88,7 +108,10 @@ class Classifier(assetManager: AssetManager, modelPath: String, labelPath: Strin
 
     private fun getSortedResult(labelProbArray: Array<FloatArray>): List<Recognition> {
         Log.d("Classifier", "List Size:(%d, %d, %d)".format(labelProbArray.size,labelProbArray[0].size,lableList.size))
-
+        /*
+        Here we instantiate a queue to accumulate the results
+        with it's size indicating the number of results to be shown
+        */
         val pq = PriorityQueue(
             maxResult,
             Comparator<Recognition> {
@@ -96,6 +119,14 @@ class Classifier(assetManager: AssetManager, modelPath: String, labelPath: Strin
                 -> confidence1.compareTo(confidence2) * -1
             })
 
+        /*
+        The list of labels are stored in:
+        lableList = Arrays.asList("cat","dog")
+         */
+        /*
+        We only consider results that have a confidence of 0.5 or
+        higher
+         */
         for (i in lableList.indices) {
             val confidence = labelProbArray[0][i]
             if (confidence >= threshHold) {
